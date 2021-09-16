@@ -9,7 +9,8 @@
 #include "opencv2/imgproc.hpp"
 #include "opencv2/imgcodecs.hpp"
 #include "opencv2/highgui.hpp"
-#include <iostream>
+#include <windows.h>
+#include <opencv2/core/types_c.h>
 using namespace cv;
 
 using namespace cooperative_groups;
@@ -49,6 +50,14 @@ __global__ void multiMatchKernel(int* total_overlap, const char* image, const ch
 	int patchSize = patchWidth * patchHeight;
 	int x = threadIdx.x;
 	int bitmapi = blockIdx.y;
+	//char* color_counts = new char[n_colors];
+	//__shared__ char main_color[2];
+	extern __shared__ char bitmap[];
+
+
+	for (int y = 0; y < patchHeight; y++) {
+		bitmap[y * patchWidth + x] = bitmaps[bitmapi * patchSize + y * patchWidth + x];
+	}
 
 	for (int patchi = blockIdx.x; patchi < patchCount; patchi += gridDim.x) {
 		int overlap = 0;
@@ -56,7 +65,8 @@ __global__ void multiMatchKernel(int* total_overlap, const char* image, const ch
 		int patchy = patchi / patchCountX;
 
 		for (int y = 0; y < patchHeight; y++) {
-			char bitmap_val = bitmaps[bitmapi * patchSize + y * patchWidth + x];
+			char bitmap_val = bitmap[y * patchWidth + x];
+			//char bitmap_val = bitmaps[bitmapi * patchSize + y * patchWidth + x];
 			char patch_val = image[(patchy * patchHeight + y) * (patchCountX * patchWidth) + (patchx * patchWidth + x)];
 			overlap += bitmap_val == patch_val;
 		}
@@ -71,6 +81,8 @@ __global__ void multiMatchKernel(int* total_overlap, const char* image, const ch
 		}
 	}
 }
+
+
 
 __global__ void sumKernel(int* sum, const int* arr)
 {
@@ -108,6 +120,9 @@ static void load_font_bitmaps(string font_file, int width, int height, vector<ch
 	string bytesline;
 	ifstream myfile(font_file);
 	int size = width * height;
+	//wcout << wchar_t(33) << "\n";
+	//wcout << wchar_t(9608) << "\n";
+	//wcout << wchar_t(33) << "\n";
 
 	if (myfile.is_open())
 	{
@@ -161,6 +176,7 @@ void render_mat(Mat mat) {
 
 
 int main() {
+	//cout<< 
 
 	// --- SET UP OUTPUT STREAMS
 
@@ -173,13 +189,14 @@ int main() {
 	std::wcout.imbue(std::locale());
 	std::wcerr.imbue(std::locale());
 
+
 	// --- LOAD CHARS
 
-	int patchWidth = 18;
-	int patchHeight = 32;
+	int patchWidth = 32;
+	int patchHeight = 57;
 	int patchSize = patchWidth * patchHeight;
 
-	string font_file = "font_33-126_18x32";
+	string font_file = "font_32-127_32x57";
 
 	vector<char> bitmaps;
 	vector<int> unicode_val;
@@ -187,33 +204,58 @@ int main() {
 	load_font_bitmaps(font_file, patchWidth, patchHeight, bitmaps, unicode_val, num_chars);
 	cout << "Read " << num_chars << " chars\n";
 
+	//render(bitmaps, patchWidth, patchHeight, 0);
+	//render(bitmaps, patchWidth, patchHeight, 1);
+	//render(bitmaps, patchWidth, patchHeight, 2);
+	//render(bitmaps, patchWidth, patchHeight, 8585-32);
+	//render(bitmaps, patchWidth, patchHeight, 8585 - 33);
+	//render(bitmaps, patchWidth, patchHeight, 8585 - 31);
+	//render(bitmaps, patchWidth, patchHeight, 9617);
+	//render(bitmaps, patchWidth, patchHeight, 9605);
 
-
-	//for (int i = 0; i < num_chars; i++) {/*
-	//	render(bitmaps, patchWidth, patchHeight, i);
-	//}*/
+	//for (int i = 0; i < num_chars; i++) {
+	//	cout << i << "\n";
+	//	cout << unicode_val[i] << "\n";
+	//	wchar_t c = wchar_t(unicode_val[i]);
+	//	wcout << c << "\n";
+	//	//render(bitmaps, patchWidth, patchHeight, i);
+	//}
 	// 
 	// 
 	char* bitmaps_arr = new char[bitmaps.size()];
 	std::copy(bitmaps.begin(), bitmaps.end(), bitmaps_arr);
 
-	// --- LOAD IMAGE
-	String imageName("C:/Users/aaron/Pictures/textrender/dragon3.png");
-	Mat src_gray, scaled_img, src_binary, final_img;
-	src_gray = imread(imageName, IMREAD_GRAYSCALE);
-	if (src_gray.empty())
-	{
-		cout << "Cannot read the image: " << imageName << std::endl;
-		return -1;
-	}
-	
-	//cvtColor(src, src_gray, COLOR_BGR2GRAY); // Convert the image to Gray
-	threshold(src_gray, src_binary, 0, 255, 1 + THRESH_OTSU);
-	cout << src_binary.type() << " " << src_binary.channels() << "\n";
 
-	double upscale = 1;
-	resize(src_binary, scaled_img, Size(src_binary.cols * upscale, src_binary.rows * upscale));
-	//Mat scaled_img = src_binary;
+	// --- LOAD IMAGE
+	String imageName("C:/Users/aaron/Pictures/textrender/tree.jpg");
+	Mat src, scaled_img, final_img;
+	src = imread(samples::findFile(imageName), IMREAD_COLOR);
+
+	Mat data;
+	src.convertTo(data, CV_32F);
+	data = data.reshape(1, data.total());
+	int n_colors = 14;
+
+	// do kmeans
+	Mat labels, centers;
+	kmeans(data, n_colors, labels, TermCriteria(CV_TERMCRIT_ITER, 10, 1.0), 3,
+		KMEANS_PP_CENTERS, centers);
+	cout << labels.rows << "x" << labels.cols << "\n";
+	//cout << centers.rows << " " << centers.cols << "\n";
+	centers = centers.reshape(3, centers.rows);
+	labels.convertTo(labels, CV_8U);
+	centers.convertTo(centers, CV_8U);
+
+	for (int i = 0; i < n_colors; i++) {
+		cout << centers.at<Vec3b>(i) << "\n"; //<< centers.at<char>(0, 1) << " " << centers.at<char>(0, 2) << "\n";
+	}
+
+	cout << src.rows << "x" << src.cols << "\n";
+	labels=labels.reshape(0,src.rows);
+	cout << labels.rows << "x" << labels.cols << "\n";
+
+	double upscale = 5;
+	resize(labels, scaled_img, Size(src.cols * upscale, src.rows * upscale));
 
 	int imgWidth = scaled_img.cols;
 	int imgHeight = scaled_img.rows;
@@ -224,26 +266,57 @@ int main() {
 	//render_mat(scaled_img);
 	Rect cropRegion(0, 0, patchCountX * patchWidth, patchCountY * patchHeight);
 
-	// Crop the full image to that image contained by the rectangle myROI
-	// Note that this doesn't copy the data
-	//Mat cropped = scaled_img(cropRegion);
-
-	//render_mat(final_img(cropRegion));
 
 	Mat roiImage = Mat(scaled_img, cropRegion);
 	roiImage.copyTo(final_img);
 	//render_mat(final_image);
 
+	//
+	
+	// UPDATE COLOR TABLE
+	HANDLE  hConsole;
+	hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
 
-	char* img_arr = new char[final_img.total()];
-	memcpy(img_arr, final_img.data, final_img.total());
+	CONSOLE_SCREEN_BUFFER_INFOEX info;
+	info.cbSize = sizeof(CONSOLE_SCREEN_BUFFER_INFOEX);
+
+	GetConsoleScreenBufferInfoEx(hConsole, &info);
+
+	for (int i = 0; i < n_colors; i++) {
+		Vec3b col = centers.at<Vec3b>(i);
+		info.ColorTable[i + 2] = RGB(col[2], col[1], col[0]);
+	}
+
+	SetConsoleScreenBufferInfoEx(hConsole, &info);
+
+	//centers = centers.reshape(3, centers.rows);
+	//labels = labels.reshape(1, src.rows);
+
+
+	//src_gray = imread(imageName, IMREAD_GRAYSCALE);
+	//if (src_gray.empty())
+	//{
+	//	cout << "Cannot read the image: " << imageName << std::endl;
+	//	return -1;
+	//}
+	//
+	////cvtColor(src, src_gray, COLOR_BGR2GRAY); // Convert the image to Gray
+	//threshold(src_gray, src_binary, 0, 255, 1 + THRESH_OTSU);
+	//cout << src_binary.type() << " " << src_binary.channels() << "\n";
+	
+	
+
+
+	char* img_arr = new char[labels.total()];
+	memcpy(img_arr, labels.data, labels.total());
 	cout << "---\n";
 	//cout << final_img.total() << "\n";
 	//cout << patchCount * patchSize << "\n";
 	cout << patchCountX << "x" << patchCountY << "\n";
-	cout << patchWidth * patchCountX << "?=" << final_img.cols << "\n";
-	cout << patchHeight * patchCountY << "?=" << final_img.rows << "\n";
-	cout << patchSize * patchCount << "?=" << final_img.total() << "\n";
+	cout << patchWidth * patchCountX << "?=" << labels.cols << "\n";
+	cout << patchHeight * patchCountY << "?=" << labels.rows << "\n";
+	cout << patchSize * patchCount << "?=" << labels.total() << "\n";
+	cout << patchSize * num_chars << "?=" << bitmaps.size() << "\n";
 	cout << "---\n";
 
 	//char* img_arr = new char[bitmaps.size()];
@@ -265,6 +338,10 @@ int main() {
 
 	// --- DISPLAY RESULT
 
+
+	wofstream myfile;
+	myfile.imbue(std::locale());
+	myfile.open("output.txt");
 	for (int patchi = 0; patchi < patchCount; patchi++) {
 		int bestMapi = 0;
 		int bestOverlap = 0;
@@ -276,12 +353,32 @@ int main() {
 			}
 		}
 		//cout << patchi << " " << bestMapi << " " << bestOverlap << "\n";
+		WORD attr = 0;
+
+
+		bool r = (rand() % 2);
+		bool g = (rand() % 2);
+		bool b = (rand() % 2);
+		bool fi = (rand() % 2);
+		attr += b * FOREGROUND_BLUE;
+		attr += r * FOREGROUND_RED;
+		attr += g * FOREGROUND_GREEN;
+		attr += FOREGROUND_INTENSITY;
+		//attr += (1-b) * BACKGROUND_BLUE;
+		//attr += (1-r) * BACKGROUND_RED;
+		//attr += (1-g) * BACKGROUND_GREEN;
+		//SetConsoleTextAttribute(hConsole, attr);
+
 		wchar_t c = wchar_t(unicode_val[bestMapi]);
+		myfile << c;
 		wcout << c;
+
 		if ((patchi + 1) % patchCountX == 0) {
+			myfile << "\n";
 			wcout << "\n";
 		}
 	}
+	myfile.close();
 
 	//cout << *totalOverlap << "\n";
 
@@ -295,73 +392,6 @@ int main() {
 	}
 
 	return 0;
-}
-
-// Helper function for using CUDA to add vectors in parallel.
-cudaError_t sumWithCuda(int* sum, const int* arr, unsigned int size)
-{
-	int* dev_sum = 0;
-	int* dev_arr = 0;
-	cudaError_t cudaStatus;
-
-	// Choose which GPU to run on, change this on a multi-GPU system.
-	cudaStatus = cudaSetDevice(0);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
-		goto Error;
-	}
-
-	// Allocate GPU buffers for three vectors (two input, one output)    .
-	cudaStatus = cudaMalloc((void**)&dev_sum, 1 * sizeof(int));
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMalloc failed!");
-		goto Error;
-	}
-
-	cudaStatus = cudaMalloc((void**)&dev_arr, size * sizeof(int));
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMalloc failed!");
-		goto Error;
-	}
-
-
-	// Copy input vectors from host memory to GPU buffers.
-	cudaStatus = cudaMemcpy(dev_arr, arr, size * sizeof(int), cudaMemcpyHostToDevice);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaMemcpy failed!");
-		goto Error;
-	}
-
-	// Launch a kernel on the GPU with one thread for each element.
-	sumKernel << <1, size >> > (dev_sum, dev_arr);
-
-	// Check for any errors launching the kernel
-	cudaStatus = cudaGetLastError();
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
-		goto Error;
-	}
-
-	// cudaDeviceSynchronize waits for the kernel to finish, and returns
-	// any errors encountered during the launch.
-	cudaStatus = cudaDeviceSynchronize();
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
-		goto Error;
-	}
-
-	// Copy output vector from GPU buffer to host memory.
-	cudaStatus = cudaMemcpy(sum, dev_sum, 1 * sizeof(int), cudaMemcpyDeviceToHost);
-	if (cudaStatus != cudaSuccess) {
-		fprintf(stderr, "return cudaMemcpy failed!");
-		goto Error;
-	}
-
-Error:
-	cudaFree(dev_arr);
-	cudaFree(dev_sum);
-
-	return cudaStatus;
 }
 
 cudaError_t bitmapMatch(int* total_overlap, const char* patch, const char* bitmap, unsigned int patchWidth, unsigned int patchHeight)
@@ -495,7 +525,7 @@ cudaError_t multiMapMatch(int* total_overlap, const char* image, const char* bit
 	}
 
 	// Launch a kernel on the GPU with one thread for each element.
-	multiMatchKernel << <dim3(500, n_bitmaps), patchWidth >> > (dev_total_overlap, dev_image, dev_bitmaps, n_bitmaps, patchWidth, patchHeight, patchCountX, patchCountY);
+	multiMatchKernel << <dim3(1000, n_bitmaps), patchWidth, patchSize >> > (dev_total_overlap, dev_image, dev_bitmaps, n_bitmaps, patchWidth, patchHeight, patchCountX, patchCountY);
 
 	// Check for any errors launching the kernel
 	cudaStatus = cudaGetLastError();
